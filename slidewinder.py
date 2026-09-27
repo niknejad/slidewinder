@@ -707,6 +707,14 @@ class BuildError(Exception):
 
 _PDFIUM = None
 
+# PDFium is NOT thread-safe and this server is threaded: opening the image
+# picker fires several thumbnail requests at once.  Concurrent PdfDocument
+# open/render/close calls corrupt the heap and take the whole process down with
+# a malloc error or a segfault, so every use of pypdfium2 here holds this lock.
+_PDFIUM_LOCK = threading.RLock()
+
+FORCE_RENDERER = None            # set by --renderer
+
 
 def pdfium():
     """The pypdfium2 module, or False if it is not installed."""
@@ -721,13 +729,15 @@ def pdfium():
 
 
 def have_pdftoppm():
+    if FORCE_RENDERER == "pypdfium2":
+        return False
     return bool(shutil.which("pdftoppm"))
 
 
 def renderer_name():
     if have_pdftoppm():
         return "pdftoppm"
-    if pdfium():
+    if FORCE_RENDERER != "pdftoppm" and pdfium():
         return "pypdfium2"
     return None
 
@@ -740,11 +750,21 @@ NO_RENDERER = (
 
 
 def render_pdf(pdf: Path, outdir: Path, prefix: str, width: int,
-               first=None, last=None):
-    """Render pages of `pdf` to outdir/<prefix>-<page>.png.  Returns {page: path}."""
+               first=None, last=None, clean=False):
+    """Render pages of `pdf` to outdir/<tag>-<page>.png.  Returns {page: path}.
+
+    `clean` wipes earlier output for this prefix first and keeps the prefix as
+    the file name - only the build thread, which is serialised, may use it.
+    Everybody else gets a unique tag, so two renders running at once can never
+    read or delete each other's files.
+    """
     outdir.mkdir(parents=True, exist_ok=True)
-    for stale in outdir.glob(prefix + "-*.png"):
-        stale.unlink(missing_ok=True)
+    if clean:
+        for stale in outdir.glob(prefix + "-*.png"):
+            stale.unlink(missing_ok=True)
+        tag = prefix
+    else:
+        tag = "%s%s" % (prefix, uuid.uuid4().hex[:8])
 
     if have_pdftoppm():
         cmd = ["pdftoppm", "-png", "-scale-to-x", str(width), "-scale-to-y", "-1"]
@@ -752,11 +772,11 @@ def render_pdf(pdf: Path, outdir: Path, prefix: str, width: int,
             cmd += ["-f", str(first)]
         if last:
             cmd += ["-l", str(last)]
-        cmd += [str(pdf), str(outdir / prefix)]
+        cmd += [str(pdf), str(outdir / tag)]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                        check=False, timeout=600)
         out = {}
-        for p in outdir.glob(prefix + "-*.png"):
+        for p in outdir.glob(tag + "-*.png"):
             m = re.search(r"-(\d+)\.png$", p.name)
             if m:
                 out[int(m.group(1))] = p
@@ -765,23 +785,24 @@ def render_pdf(pdf: Path, outdir: Path, prefix: str, width: int,
     pdfium_mod = pdfium()
     if not pdfium_mod:
         raise BuildError(NO_RENDERER)
-    doc = pdfium_mod.PdfDocument(str(pdf))
     out = {}
-    try:
-        lo = first or 1
-        hi = last or len(doc)
-        for i in range(lo, min(hi, len(doc)) + 1):
-            page = doc[i - 1]
-            scale = max(0.1, width / float(page.get_width()))
-            img = page.render(scale=scale).to_pil()
-            path = outdir / ("%s-%d.png" % (prefix, i))
-            img.save(str(path))
-            out[i] = path
-    finally:
+    with _PDFIUM_LOCK:                       # see the note on _PDFIUM_LOCK
+        doc = pdfium_mod.PdfDocument(str(pdf))
         try:
-            doc.close()
-        except Exception:                                   # noqa: BLE001
-            pass
+            lo = first or 1
+            hi = last or len(doc)
+            for i in range(lo, min(hi, len(doc)) + 1):
+                page = doc[i - 1]
+                scale = max(0.1, width / float(page.get_width()))
+                img = page.render(scale=scale).to_pil()
+                path = outdir / ("%s-%d.png" % (tag, i))
+                img.save(str(path))
+                out[i] = path
+        finally:
+            try:
+                doc.close()
+            except Exception:                               # noqa: BLE001
+                pass
     return out
 
 
@@ -984,7 +1005,9 @@ class Project:
     def _thumbnails(self, pdf: Path):
         for old in self.pages.glob("*.png"):
             old.unlink(missing_ok=True)
-        self.thumb_files = render_pdf(pdf, self.thumbs, "t", self.thumb_width)
+        # only the build thread reaches this, and it holds self.lock
+        self.thumb_files = render_pdf(pdf, self.thumbs, "t", self.thumb_width,
+                                      clean=True)
 
     def _cache_thumbs(self, keep=600):
         """Remember what each live block looked like, so a hidden one can still
@@ -1017,7 +1040,7 @@ class Project:
         for p in got.values():
             p.replace(out)
             return out
-        return None
+        return None if not out.exists() else out
 
     # -- writing -----------------------------------------------------------
     def apply_order(self, order, disabled=(), edits=None, inserts=None,
@@ -1157,7 +1180,10 @@ class Project:
             if not out.exists():
                 got = render_pdf(p, self.imgcache, "tmpimg", 400, first=1, last=1)
                 for f in got.values():
-                    f.replace(out)
+                    try:
+                        f.replace(out)
+                    except OSError:
+                        pass
                     break
             return out if out.exists() else None
         return None
@@ -1195,9 +1221,10 @@ def _pdf_pages(pdf: Path):
     mod = pdfium()
     if mod:
         try:
-            doc = mod.PdfDocument(str(pdf))
-            n = len(doc)
-            doc.close()
+            with _PDFIUM_LOCK:
+                doc = mod.PdfDocument(str(pdf))
+                n = len(doc)
+                doc.close()
             return n
         except Exception:                                   # noqa: BLE001
             pass
@@ -2253,6 +2280,9 @@ def main(argv=None):
                     help="latex passes per build (default: 2)")
     ap.add_argument("--width", type=int, default=640,
                     help="thumbnail render width in px (default: 640)")
+    ap.add_argument("--renderer", choices=("auto", "pdftoppm", "pypdfium2"),
+                    default="auto",
+                    help="force a PDF renderer (default: pdftoppm if installed)")
     ap.add_argument("--no-sections", action="store_true",
                     help="do not treat \\section commands as movable")
     ap.add_argument("--subsections", action="store_true",
@@ -2262,6 +2292,8 @@ def main(argv=None):
                     help="print the page map and HTTP requests")
     args = ap.parse_args(argv)
     augment_path()
+    global FORCE_RENDERER
+    FORCE_RENDERER = None if args.renderer == "auto" else args.renderer
 
     if args.check:
         sys.exit(0 if check_deps(args.engine) else 1)

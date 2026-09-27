@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.1 — 2026-09-27
+
+- **Fixed a crash that killed the server** (`malloc: pointer being freed was not
+  allocated`, or a segfault) when opening the image picker on a deck whose
+  figures are PDFs. PDFium is not thread-safe and the server is threaded, so the
+  browser's parallel thumbnail requests were rendering concurrently and
+  corrupting the heap. All pypdfium2 use is now serialised behind one lock.
+  Only decks using the pypdfium2 renderer — that is, machines without poppler —
+  were affected.
+- Fixed parallel renders deleting each other's output files, which made
+  thumbnails intermittently come back 404.
+- Added `--renderer {auto,pdftoppm,pypdfium2}` to force one renderer.
+
 ## 1.0.0 — 2026-09-27
 
 First public release, under the name **Slidewinder** (previously `beamer_sort`).

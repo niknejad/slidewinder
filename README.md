@@ -233,6 +233,7 @@ the deck, not into `.slidewinder/`.
     --engine E    xelatex (default), pdflatex, lualatex
     --passes N    LaTeX passes per build (default 2, for TOC/refs)
     --width N     thumbnail render width in px (default 640)
+    --renderer R  force auto (default), pdftoppm, or pypdfium2
     --no-sections do not treat \section as movable
     --subsections also treat \subsection as movable
     --no-open     do not open a browser
