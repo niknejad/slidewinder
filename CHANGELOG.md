@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.3 — 2026-09-27
+
+- The editor's preview pane is resizable: drag the divider, double-click it to
+  reset, and the width is remembered between sessions. It is clamped so the
+  editor keeps at least 380px.
+- The preview now uses the full-size page render rather than the grid
+  thumbnail, so it stays sharp at any width instead of going soft as soon as
+  the pane is widened.
+
 ## 1.0.2 — 2026-09-27
 
 - **Grids now sit at the top of the slide.** They were written with

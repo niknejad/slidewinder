@@ -79,6 +79,10 @@ Click any slide. The rendered page sits beside the text so you can see what you
 are changing; **Save & rebuild** (⌘/ctrl+Enter) writes, recompiles and refreshes
 the preview without closing.
 
+Drag the divider between the two to make the preview as large as you need — it
+renders at full size, so it stays sharp however wide you pull it, and the width
+is remembered. Double-click the divider to put it back.
+
 ![The editor](docs/editor.png)
 
 **Visual** gives you a title field and one box per region of the slide, with a

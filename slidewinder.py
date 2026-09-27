@@ -1357,9 +1357,14 @@ pre#log{margin:8px 16px 24px;padding:10px 12px;background:var(--panel);border:1p
 .tab.on{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);
  position:relative;z-index:1}
 .edbody{flex:1;display:flex;min-height:0}
-.edmain{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
-.edside{width:340px;flex:none;border-left:1px solid var(--line);padding:12px;
+.edmain{flex:1;display:flex;flex-direction:column;min-width:320px;min-height:0}
+.edside{width:var(--side,340px);flex:none;padding:12px;
  display:flex;flex-direction:column;gap:8px;overflow:auto}
+/* drag this to make the preview as big as you need */
+.grip{flex:none;width:7px;cursor:col-resize;background:var(--line);
+ background-clip:content-box;padding:0 3px;box-sizing:border-box;
+ border-left:1px solid var(--line);border-right:1px solid var(--line)}
+.grip:hover,.grip.on{background:var(--accent)}
 .prevbox{border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden;
  min-height:60px;display:flex;align-items:center;justify-content:center}
 .prevbox img{width:100%;height:auto;display:block}
@@ -1465,6 +1470,7 @@ textarea.cell.drop,#edtext.drop{outline:2px dashed var(--accent);outline-offset:
         </div>
         <textarea id="edtext" spellcheck="false" hidden></textarea>
       </div>
+      <div class="grip" id="grip" title="drag to resize the preview &middot; double-click to reset"></div>
       <div class="edside">
         <div class="prevbox"><img id="edimg" alt="slide preview"></div>
         <div class="hint" id="edstatus"></div>
@@ -1786,6 +1792,22 @@ function edText(){
                           : (edKind==='frame' ? genLatex(edModel) : $('#edtext').value);
 }
 
+/* The pane is resizable, so the preview uses the full-size render (1400px)
+   rather than the grid thumbnail, which would go soft as soon as you widen it.
+   A slide that is not in the PDF falls back to its cached thumbnail. */
+function previewSrc(j){
+  if(j.pages && j.pages.length) return 'page/'+S.stamp+'/'+j.pages[0]+'.png';
+  return j.thumb || '';
+}
+
+function showPreview(j){
+  const src=previewSrc(j);
+  $('#edimg').src=src;
+  $('#edimg').style.display=src?'block':'none';
+  $('#edstatus').textContent=j.pages&&j.pages.length
+      ? 'page '+j.pages.join(', ') : 'not in the PDF right now';
+}
+
 async function edit(id){
   const j=await (await fetch('api/source?id='+id,{cache:'no-store'})).json();
   if(j.error){ flash=j.error; render(); return; }
@@ -1795,10 +1817,7 @@ async function edit(id){
   $('#edtitle').textContent=(j.kind==='frame'?'Slide':j.kind)+' '+(n+1)+'/'+order.length+
     (j.disabled?'  \u2014 commented out':'');
   $('#ederr').textContent='';
-  $('#edimg').src=j.thumb? j.thumb : '';
-  $('#edimg').style.display=j.thumb?'block':'none';
-  $('#edstatus').textContent=j.pages&&j.pages.length
-      ? 'page '+j.pages.join(', ') : 'not in the PDF right now';
+  showPreview(j);
   $('#edtext').value=j.text;
   setTab(edModel? 'visual' : 'source');
   $('#editor').style.display='flex';
@@ -2011,9 +2030,7 @@ async function edStep(d){
 async function refreshPreview(id){
   const j=await (await fetch('api/source?id='+id,{cache:'no-store'})).json();
   if(j.error) return;
-  $('#edimg').src=j.thumb||''; $('#edimg').style.display=j.thumb?'block':'none';
-  $('#edstatus').textContent=j.pages&&j.pages.length
-      ? 'page '+j.pages.join(', ') : 'not in the PDF right now';
+  showPreview(j);
   if(edTab==='visual'&&j.frame){ edModel=j.frame; renderParts(); }
   else if(edTab==='source') $('#edtext').value=j.text;
 }
@@ -2094,6 +2111,39 @@ $('#editor').addEventListener('keydown',e=>{
 $('#editor').addEventListener('dragover',e=>{ if(e.dataTransfer.types.includes('Files'))
   e.preventDefault(); });
 $('#editor').addEventListener('drop',e=>{ if(e.dataTransfer.files.length) e.preventDefault(); });
+/* ---- resizable preview pane ------------------------------------------- */
+const SIDE_DEFAULT=340, SIDE_MIN=220;
+function setSide(px){
+  document.documentElement.style.setProperty('--side', Math.round(px)+'px');
+}
+try{ const w=parseInt(localStorage.getItem('sw.side')||'',10);
+     if(w>=SIDE_MIN) setSide(w); }catch(err){}
+(function(){
+  const grip=$('#grip');
+  let panel=null;
+  const move=ev=>{
+    if(!panel) return;
+    const max=Math.max(SIDE_MIN, panel.width-380);
+    setSide(Math.max(SIDE_MIN, Math.min(max, panel.right-ev.clientX)));
+  };
+  const up=ev=>{
+    panel=null; grip.classList.remove('on');
+    window.removeEventListener('pointermove',move);
+    window.removeEventListener('pointerup',up);
+    try{ localStorage.setItem('sw.side',
+        parseInt(getComputedStyle($('#editor .edside')).width,10)); }catch(err){}
+  };
+  grip.addEventListener('pointerdown',ev=>{
+    ev.preventDefault();
+    panel=$('#editor .panel').getBoundingClientRect();
+    grip.classList.add('on');
+    window.addEventListener('pointermove',move);
+    window.addEventListener('pointerup',up);
+  });
+  grip.addEventListener('dblclick',()=>{ setSide(SIDE_DEFAULT);
+    try{ localStorage.setItem('sw.side',SIDE_DEFAULT); }catch(err){} });
+})();
+
 $('#logbtn').onclick=()=>{ showLog=!showLog; render(); };
 $('#zoom').oninput=render;
 grid.addEventListener('dragover',e=>e.preventDefault());
