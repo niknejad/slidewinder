@@ -1,0 +1,92 @@
+\documentclass{beamer}
+\usetheme{Madrid}
+\usecolortheme{seahorse}
+\title{Coupled Resonators}
+\subtitle{a Slidewinder demo deck}
+\author{A. Niknejad}
+\date{\today}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+\section{Motivation}
+
+\begin{frame}{Why bother}
+  \begin{itemize}
+    \item Slides get written out of order.
+    \item Reordering them by hand means moving blocks of \LaTeX{} around.
+    \item One wrong brace and the deck stops compiling.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Building up an argument}
+  First the claim.
+  \pause
+  Then the evidence.
+  \pause
+  Then the caveat.
+\end{frame}
+
+\section{Method}
+
+\begin{frame}{Two coupled tanks}
+  \begin{itemize}
+    \item<1-> Each tank has its own $L$ and $C$.
+    \item<2-> Coupling $k$ splits the resonance in two.
+    \item<3-> The split grows with $k$.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Notes grid}
+\begin{columns}[t]
+\begin{column}{0.480\textwidth}
+\textbf{Observation}
+
+The peak splits at $k > 1/Q$.
+\end{column}
+\begin{column}{0.480\textwidth}
+\textbf{Question}
+
+Does the split survive loss?
+\end{column}
+\end{columns}
+
+\vfill
+
+\begin{columns}[t]
+\begin{column}{0.480\textwidth}
+\textbf{Next}
+\begin{itemize}
+  \item sweep $k$
+  \item measure $Q$
+\end{itemize}
+\end{column}
+\begin{column}{0.480\textwidth}
+\textbf{Reference}
+
+Nothing yet.
+\end{column}
+\end{columns}
+\end{frame}
+
+% \begin{frame}{Parked for now}
+%   This frame is commented out, and Slidewinder still shows it - dimmed,
+%   in place, one click from coming back.
+% \end{frame}
+
+\begin{frame}[fragile]{A fragile frame}
+\begin{verbatim}
+for (int i = 0; i < n; i++) { }  % not a comment in here
+\end{verbatim}
+\end{frame}
+
+\section{Wrap up}
+
+\begin{frame}{Conclusion}
+  The deck is still a \texttt{.tex} file. Nothing here owns it.
+\end{frame}
+
+\end{document}

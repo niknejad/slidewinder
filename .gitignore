@@ -1,0 +1,17 @@
+# only the demo deck ships; anything else you drop in example/ is yours
+example/*
+!example/demo.tex
+
+.slidewinder/
+.beamer_sort/
+.venv/
+__pycache__/
+*.pyc
+*.aux
+*.log
+*.nav
+*.out
+*.snm
+*.toc
+*.synctex.gz
+.DS_Store

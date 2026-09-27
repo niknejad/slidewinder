@@ -1,0 +1,4 @@
+# Only needed when poppler's pdftoppm is not installed system-wide.
+# Both are pure wheels - no compiler, no homebrew, no system libraries.
+pypdfium2>=4.25
+pillow>=10.0
