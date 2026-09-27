@@ -105,8 +105,8 @@ Set *rows × columns* and press **Split into grid**. The slide becomes that many
 is thrown away.
 
 ```latex
-\begin{frame}{Notes}
-\begin{columns}[t]
+\begin{frame}[t]{Notes}
+\begin{columns}[T]
 \begin{column}{0.480\textwidth}
   ...cell...
 \end{column}
@@ -117,7 +117,7 @@ is thrown away.
 
 \vfill
 
-\begin{columns}[t]
+\begin{columns}[T]
   ...
 \end{columns}
 \end{frame}
@@ -127,6 +127,13 @@ Each row has **+ col**, **− col**, ↑, ↓ and ×; **+ row** and **+ full-wid
 block** add more. Widths are recomputed to fit (`0.96/n` of the text width) and
 rows are separated by `\vfill`, so they spread down the slide — change that in
 the LaTeX tab if you want them packed.
+
+The `[t]` on the frame and `[T]` on the columns are both load-bearing. Beamer
+centres a frame's content vertically, and `columns[t]` aligns *baselines*, which
+makes the block almost all depth — so a grid written that way sinks down the
+slide with a band of blank space above it. `[T]` aligns the tops of the cells
+and the frame's `[t]` puts the block where you expect. If a frame already
+specifies `c`, `b` or `s`, that choice is left alone.
 
 Decks not made here work too: any frame already built from `columns`, in the
 long `\begin{column}{…}` or short `\column{…}` form, comes apart into the same

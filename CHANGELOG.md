@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.2 — 2026-09-27
+
+- **Grids now sit at the top of the slide.** They were written with
+  `\begin{columns}[t]`, which aligns baselines and leaves the block almost all
+  depth; beamer then centres it and you get a band of blank space above the
+  grid. New grids use `[T]` on the columns and add `t` to the frame's options,
+  which is what actually top-aligns both the block and the cells. A frame that
+  already asks for `c`, `b` or `s` keeps it. Existing grids are corrected the
+  next time you save that slide from the Visual tab.
+
 ## 1.0.1 — 2026-09-27
 
 - **Fixed a crash that killed the server** (`malloc: pointer being freed was not

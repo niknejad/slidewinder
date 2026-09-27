@@ -1732,6 +1732,24 @@ let edId=null, edModel=null, edKind='frame', edTab='visual', edDirty=false,
 
 function colWidth(n){ return (0.96/n).toFixed(3)+'\\textwidth'; }
 
+/* Beamer centres a frame's content vertically, and columns[t] makes the block
+   almost all depth, so a grid written with [t] sinks down the slide with a gap
+   above it.  A grid belongs at the top: that needs [T] on the columns AND a
+   top-aligned frame.  Anything the author already chose (c, b, s) is left be. */
+const ALIGN_KEYS=['t','c','b','s'];
+function colOpts(p){
+  const o=(p.opts||'').trim();
+  return (!o || o==='[t]') ? '[T]' : o;
+}
+function topOpts(opts){
+  opts=opts||'';
+  const m=opts.match(/^([^\[]*)\[([^\]]*)\](.*)$/);
+  if(!m) return opts+'[t]';
+  const keys=m[2].split(',').map(s=>s.trim()).filter(Boolean);
+  if(keys.some(k=>ALIGN_KEYS.includes(k))) return opts;
+  return m[1]+'['+(keys.length? keys.join(',')+',t' : 't')+']'+m[3];
+}
+
 /* model -> LaTeX.  This is the only place the frame's shape is written. */
 function genLatex(m){
   const chunks=[];
@@ -1740,7 +1758,7 @@ function genLatex(m){
       const t=(p.text||'').replace(/\s+$/,'');
       chunks.push({row:false, text:t});
     }else{
-      const L=['\\begin{columns}'+(p.opts||'[t]')];
+      const L=['\\begin{columns}'+colOpts(p)];
       (p.cols||[]).forEach(c=>{
         L.push('\\begin{column}{'+(c.w||colWidth(p.cols.length))+'}');
         const t=(c.text||'').replace(/\s+$/,'');
@@ -1757,7 +1775,9 @@ function genLatex(m){
     if(body.length) body.push(c.row&&chunks[i-1]&&chunks[i-1].row ? '\n\n\\vfill\n\n' : '\n\n');
     body.push(c.text);
   });
-  const head='\\begin{frame}'+(m.opts||'')+(m.title? '{'+m.title+'}':'');
+  const grid=(m.parts||[]).some(p=>p.kind==='row');
+  const opts=grid? topOpts(m.opts||'') : (m.opts||'');
+  const head='\\begin{frame}'+opts+(m.title? '{'+m.title+'}':'');
   return head+'\n'+body.join('')+'\n\\end{frame}';
 }
 
@@ -1882,7 +1902,7 @@ function makeGrid(){
   for(let r=0;r<R;r++){
     const cols=[];
     for(let c=0;c<C;c++) cols.push({w:colWidth(C), text:''});
-    parts.push({kind:'row', opts:'[t]', cols:cols});
+    parts.push({kind:'row', opts:'[T]', cols:cols});
   }
   if(keep.length) parts[0].cols[0].text=keep.join('\n\n');
   edModel.parts=parts; struct();
@@ -2038,7 +2058,7 @@ $('#vtitle').oninput=e=>{ if(edModel){ edModel.title=e.target.value; edDirty=tru
 $('#gapply').onclick=makeGrid;
 $('#addrow').onclick=()=>{ const C=Math.max(1,Math.min(8,+$('#gcols').value||2));
   const cols=[]; for(let i=0;i<C;i++) cols.push({w:colWidth(C),text:''});
-  edModel.parts.push({kind:'row',opts:'[t]',cols:cols}); struct(); };
+  edModel.parts.push({kind:'row',opts:'[T]',cols:cols}); struct(); };
 $('#addtext').onclick=()=>{ edModel.parts.push({kind:'text',text:''}); struct(); };
 $('#pkclose').onclick=()=>{ $('#picker').style.display='none'; };
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{
