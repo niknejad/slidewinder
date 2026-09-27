@@ -1333,9 +1333,20 @@ main{padding:16px}
 pre#log{margin:8px 16px 24px;padding:10px 12px;background:var(--panel);border:1px solid var(--line);
  border-radius:8px;max-height:260px;overflow:auto;font-size:11.5px;white-space:pre-wrap;color:var(--muted)}
 #overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;z-index:50;
- align-items:center;justify-content:center;flex-direction:column;gap:10px;padding:24px}
-#overlay img{max-width:min(94vw,1200px);max-height:80vh;background:#fff;border-radius:6px}
-#overlay .cap{color:#e8eaee;font-size:13px}
+ flex-direction:column;gap:10px;padding:16px;overflow:auto;
+ align-items:flex-start;justify-content:flex-start}
+/* margin:auto centres it while small without making the overflow unreachable
+   once it is zoomed past the window, which align-items:center would do */
+#overlay img{background:#fff;border-radius:6px;flex:none;margin:auto}
+#overlay img.fit{max-width:96vw;max-height:84vh}
+#overlay img.zoom{max-width:none;max-height:none}
+#overlay .cap{color:#e8eaee;font-size:13px;display:flex;align-items:center;gap:8px;
+ flex:none;position:sticky;bottom:0;left:0;margin:0 auto;
+ background:rgba(20,20,24,.86);padding:7px 12px;border-radius:9px;
+ backdrop-filter:blur(3px)}
+#overlay .cap button{background:rgba(255,255,255,.14);border-color:transparent;color:#fff;
+ padding:3px 10px}
+#overlay .cap button:hover{background:rgba(255,255,255,.3);border-color:transparent}
 #editor,#picker,#ask{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;
  z-index:60;align-items:center;justify-content:center;padding:20px}
 #picker{z-index:70} #ask{z-index:80}
@@ -1428,7 +1439,16 @@ textarea.cell.drop,#edtext.drop{outline:2px dashed var(--accent);outline-offset:
 <div id="status"></div>
 <main><div id="grid"></div></main>
 <pre id="log" hidden></pre>
-<div id="overlay"><img id="big" alt=""><div class="cap" id="cap"></div></div>
+<div id="overlay">
+  <img id="big" class="fit" alt="">
+  <div class="cap">
+    <span id="cap"></span>
+    <button id="zout" title="smaller (-)">&minus;</button>
+    <button id="zfit" title="fit the window (0)">fit</button>
+    <button id="zin" title="bigger (+)">+</button>
+    <button id="vclose" title="close (Esc)">close</button>
+  </div>
+</div>
 <div id="editor">
   <div class="panel">
     <div class="bar">
@@ -1438,6 +1458,7 @@ textarea.cell.drop,#edtext.drop{outline:2px dashed var(--accent);outline-offset:
       <span class="grow"></span>
       <button id="edprev" title="previous slide">&#9664;</button>
       <button id="ednext" title="next slide">&#9654;</button>
+      <button id="ednew" title="save this slide and add a new one after it (n)">+ New</button>
       <button id="edclose">Close</button>
       <button id="edsave" class="primary">Save &amp; rebuild</button>
     </div>
@@ -1496,7 +1517,7 @@ textarea.cell.drop,#edtext.drop{outline:2px dashed var(--accent);outline-offset:
 </div></div>
 <script>
 let S=null, order=[], hidden=new Set(), dirty=false, dragId=null, poll=null,
-    sel=null, showLog=false, flash='', pendingRefresh=null;
+    sel=null, showLog=false, flash='', pendingRefresh=null, clickTimer=null;
 const $=s=>document.querySelector(s);
 const grid=$('#grid');
 
@@ -1624,14 +1645,21 @@ function card(b,i){
     dirty=true; render();
   });
   d.addEventListener('drop',e=>e.preventDefault());
-  let clickT=null;
-  d.addEventListener('click',()=>{ sel=b.id; render();
-    clearTimeout(clickT);
-    clickT=setTimeout(()=>{ if(!S.building) edit(b.id); },180);   // let dblclick win
+  // selection alone must not re-render: replacing the node mid-gesture loses
+  // the pending timer (and can swallow the dblclick entirely)
+  d.addEventListener('click',()=>{ selectOnly(b.id);
+    clearTimeout(clickTimer);
+    clickTimer=setTimeout(()=>{ if(!S.building) edit(b.id); },200); // let dblclick win
   });
-  d.addEventListener('dblclick',()=>{ clearTimeout(clickT); sel=b.id;
+  d.addEventListener('dblclick',()=>{ clearTimeout(clickTimer); selectOnly(b.id);
     if(b.pages.length&&!off) show(b.pages,b.title); });
   return d;
+}
+
+function selectOnly(id){
+  sel=id;
+  grid.querySelectorAll('.card').forEach(c=>
+    c.classList.toggle('sel', c.dataset.id!==undefined && +c.dataset.id===id));
 }
 
 async function removeBlock(id){
@@ -1680,18 +1708,48 @@ function move(delta){
   const el=grid.querySelector('[data-id="'+sel+'"]'); if(el) el.scrollIntoView({block:'nearest'});
 }
 
+/* The full-size viewer.  "fit" sizes the page to the window; zooming past that
+   switches to an explicit pixel width and lets the overlay scroll, so you can
+   get right in on a figure. */
+let zoomPct=0;                                  // 0 = fit
 function show(pages,title){
   let k=0;
   const ov=$('#overlay'), im=$('#big'), cap=$('#cap');
-  const draw=()=>{ im.src='page/'+S.stamp+'/'+pages[k]+'.png';
-    cap.textContent=(title||'')+'  \u2014  page '+pages[k]+(pages.length>1?' ('+(k+1)+'/'+pages.length+')':'')+
-      '   [\u2190/\u2192 pages, Esc to close]'; };
-  ov.style.display='flex'; draw();
-  ov.onclick=()=>{ov.style.display='none';document.onkeydown=keys;};
+  zoomPct=0;
+  const apply=()=>{
+    if(zoomPct){ im.className='zoom'; im.style.width=Math.round(
+        (im.naturalWidth||1400)*zoomPct/100)+'px'; }
+    else { im.className='fit'; im.style.width=''; }
+  };
+  const draw=()=>{ im.src='page/'+S.stamp+'/'+pages[k]+'.png'; apply();
+    cap.textContent=(title||'')+'  \u2014  page '+pages[k]+
+      (pages.length>1?' ('+(k+1)+'/'+pages.length+')':'')+
+      (zoomPct? '  \u00b7  '+zoomPct+'%' : '')+'   [\u2190/\u2192 pages]'; };
+  const zoom=d=>{
+    if(!zoomPct){                               // start from what fit is showing
+      zoomPct=Math.round(100*im.getBoundingClientRect().width/
+                         (im.naturalWidth||1400)/25)*25 || 100;
+    }
+    zoomPct=Math.max(25,Math.min(400,zoomPct+d));
+    draw();
+  };
+  const close=()=>{ ov.style.display='none'; document.onkeydown=keys; };
+  ov.style.display='flex';
+  im.onload=apply;
+  draw();
+  ov.onclick=e=>{ if(e.target===ov) close(); };  // clicks on the image do nothing
+  $('#vclose').onclick=close;
+  $('#zin').onclick=e=>{ e.stopPropagation(); zoom(25); };
+  $('#zout').onclick=e=>{ e.stopPropagation(); zoom(-25); };
+  $('#zfit').onclick=e=>{ e.stopPropagation(); zoomPct=0; draw(); };
   document.onkeydown=e=>{
-    if(e.key==='Escape'){ov.style.display='none';document.onkeydown=keys;}
-    else if(e.key==='ArrowRight'&&k<pages.length-1){k++;draw();}
-    else if(e.key==='ArrowLeft'&&k>0){k--;draw();}
+    if(e.key==='Escape'){ close(); }
+    else if(e.key==='ArrowRight'&&k<pages.length-1){ k++; draw(); }
+    else if(e.key==='ArrowLeft'&&k>0){ k--; draw(); }
+    else if(e.key==='+'||e.key==='='){ zoom(25); }
+    else if(e.key==='-'||e.key==='_'){ zoom(-25); }
+    else if(e.key==='0'){ zoomPct=0; draw(); }
+    else return;
     e.preventDefault();
   };
   render();
@@ -2019,6 +2077,23 @@ async function saveEdit(keepOpen){
   pendingRefresh=id;                        // refresh the preview after the build
 }
 
+/* New slide from inside the editor: whatever you have typed is saved and the
+   slide is added in the same write, so it costs one backup and one build and
+   the editor moves to the new slide when it comes back. */
+async function edNew(){
+  if(edId===null || S.building) return;
+  const t=await fetch('api/template',{cache:'no-store'});
+  const tpl=(await t.json()).text;
+  const body={order:order, disabled:[...hidden], edits:{},
+              inserts:[{after:edId, text:tpl}]};
+  if(edDirty) body.edits[edId]=edText();
+  const j=await send('api/apply',body);
+  if(j.error){ $('#ederr').textContent=j.error; flash=''; return; }
+  $('#ederr').textContent=''; edDirty=false; dirty=false;
+  if(j.new && j.new.length){ pendingSelect=j.new[0]; pendingEdit=true; }
+  await load(true);
+}
+
 async function edStep(d){
   const i=order.indexOf(edId);
   if(i<0) return;
@@ -2071,6 +2146,7 @@ $('#edclose').onclick=tryClose;
 $('#edsave').onclick=()=>saveEdit(true);
 $('#edprev').onclick=()=>edStep(-1);
 $('#ednext').onclick=()=>edStep(1);
+$('#ednew').onclick=edNew;
 $('#vtitle').oninput=e=>{ if(edModel){ edModel.title=e.target.value; edDirty=true; } };
 $('#gapply').onclick=makeGrid;
 $('#addrow').onclick=()=>{ const C=Math.max(1,Math.min(8,+$('#gcols').value||2));

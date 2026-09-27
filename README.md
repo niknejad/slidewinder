@@ -64,8 +64,9 @@ slots they already occupy, so the material between two frames does not travel
 with them.
 
 A frame that spans several PDF pages (`\pause`, `<1->` overlays) is one card
-showing its first page with a page-count badge. Double-click to page through it
-full size.
+showing its first page with a page-count badge. Double-click to open it full
+size, where ← → page through the overlays and **− / fit / +** (or `-`, `0`, `+`)
+zoom from 25% to 400% — enough to check a figure's small print.
 
 **While you drag**, the card you are moving turns dashed, the two cards it will
 land between are outlined on the facing edges, and the status line spells it
@@ -100,7 +101,9 @@ toolbar that inserts what you would otherwise have to remember:
 the visual view will write; switching back re-parses, so hand-written LaTeX
 survives the round trip and stays editable in boxes afterwards.
 
-◀ ▶ step through the deck without leaving the editor.
+◀ ▶ step through the deck without leaving the editor, and **+ New** adds a
+slide straight after this one and moves the editor to it — anything you had
+typed is saved in the same write, so it costs one backup and one build.
 
 ## Rows and columns
 
@@ -199,6 +202,7 @@ Delete key) removes a slide after a confirm.
 | n | insert a new slide after it |
 | Delete | delete it (asks first) |
 | ⌘/ctrl + Enter | save the editor; Esc closes it |
+| ← → / + − 0 / Esc in the viewer | page, zoom, fit, close |
 
 ## How it knows which page is which frame
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.4 — 2026-09-27
+
+- **+ New** in the editor: adds a slide after the current one and moves the
+  editor to it. Unsaved work on the current slide goes out in the same write,
+  so it is one backup and one build rather than two.
+- The full-size viewer fills the window and zooms: **− / fit / +** buttons and
+  the `-`, `0`, `+` keys, 25% to 400%, scrolling when zoomed past the window.
+- Fixed double-click on a card opening the editor on top of the viewer.
+  Selecting a card used to re-render the whole grid, which replaced the node
+  mid-gesture and stranded the pending single-click timer; selection now just
+  moves a class.
+
 ## 1.0.3 — 2026-09-27
 
 - The editor's preview pane is resizable: drag the divider, double-click it to
