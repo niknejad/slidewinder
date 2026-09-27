@@ -1353,7 +1353,9 @@ pre#log{margin:8px 16px 24px;padding:10px 12px;background:var(--panel);border:1p
 #editor .panel,#picker .panel,#ask .panel{background:var(--panel);
  border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;
  box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden}
-#editor .panel{width:min(1500px,98vw);height:min(940px,94vh)}
+/* the editor window itself: drag the bottom-right corner */
+#editor .panel{width:min(1500px,98vw);height:min(940px,94vh);
+ resize:both;min-width:680px;min-height:420px;max-width:98vw;max-height:96vh}
 #picker .panel{width:min(900px,92vw);max-height:80vh}
 #ask .panel{width:min(420px,92vw)}
 .askmsg{padding:18px 18px 4px;line-height:1.5}
@@ -1381,6 +1383,9 @@ pre#log{margin:8px 16px 24px;padding:10px 12px;background:var(--panel);border:1p
 .prevbox img{width:100%;height:auto;display:block}
 #vis{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px;
  min-height:0}
+/* an id selector beats the UA's [hidden]{display:none}, so say it again here -
+   without this the visual pane stays on screen under the LaTeX tab */
+#vis[hidden],#edtext[hidden],#parts[hidden]{display:none}
 .toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .toolbar .sep{width:1px;height:20px;background:var(--line);margin:0 4px}
 .toolbar input[type=number]{width:52px;padding:5px 6px;border-radius:6px;
@@ -1406,7 +1411,7 @@ textarea.cell,#edtext{border:0;outline:0;resize:vertical;padding:10px;width:100%
 textarea.cell{flex:1;min-height:90px;resize:none}
 textarea.cell:focus{background:var(--accent-soft)}
 textarea.cell.drop,#edtext.drop{outline:2px dashed var(--accent);outline-offset:-4px}
-#edtext{flex:1;min-height:0;height:100%}
+#edtext{flex:1;min-height:0;height:100%;resize:none}
 #pkgrid{flex:1;overflow:auto;padding:12px;display:flex;flex-wrap:wrap;gap:10px;
  align-content:flex-start;min-height:140px}
 #pkgrid.drop{outline:2px dashed var(--accent);outline-offset:-6px}
@@ -2187,6 +2192,22 @@ $('#editor').addEventListener('keydown',e=>{
 $('#editor').addEventListener('dragover',e=>{ if(e.dataTransfer.types.includes('Files'))
   e.preventDefault(); });
 $('#editor').addEventListener('drop',e=>{ if(e.dataTransfer.files.length) e.preventDefault(); });
+/* ---- the editor window remembers the size you drag it to --------------- */
+(function(){
+  const panel=$('#editor .panel');
+  try{
+    const s=JSON.parse(localStorage.getItem('sw.edsize')||'null');
+    if(s && s.w>=680 && s.h>=420){ panel.style.width=s.w+'px'; panel.style.height=s.h+'px'; }
+  }catch(err){}
+  let t=null;
+  new ResizeObserver(()=>{
+    if($('#editor').style.display!=='flex') return;   // ignore layout at startup
+    clearTimeout(t);
+    t=setTimeout(()=>{ try{ localStorage.setItem('sw.edsize', JSON.stringify(
+        {w:Math.round(panel.offsetWidth), h:Math.round(panel.offsetHeight)})); }catch(err){} },400);
+  }).observe(panel);
+})();
+
 /* ---- resizable preview pane ------------------------------------------- */
 const SIDE_DEFAULT=340, SIDE_MIN=220;
 function setSide(px){

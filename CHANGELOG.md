@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.5 — 2026-09-27
+
+- **Fixed the LaTeX tab showing the visual editor as well.** `#vis` set
+  `display:flex` from an id selector, which outranks the UA's
+  `[hidden]{display:none}`, so hiding it did nothing. The LaTeX tab is now just
+  the source.
+- The editor window is resizable from its bottom-right corner, and the size is
+  remembered. Minimum 680×420.
+
 ## 1.0.4 — 2026-09-27
 
 - **+ New** in the editor: adds a slide after the current one and moves the

@@ -82,7 +82,8 @@ the preview without closing.
 
 Drag the divider between the two to make the preview as large as you need — it
 renders at full size, so it stays sharp however wide you pull it, and the width
-is remembered. Double-click the divider to put it back.
+is remembered. Double-click the divider to put it back. The window itself
+resizes from its bottom-right corner and remembers that too.
 
 ![The editor](docs/editor.png)
 
