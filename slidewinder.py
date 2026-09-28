@@ -33,7 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 WORKDIR = ".slidewinder"          # previews, thumbnails, caches and backups
 OLD_WORKDIRS = (".beamer_sort",)  # earlier name; moved across on first run
 
@@ -1517,6 +1517,7 @@ textarea.cell.drop,#edtext.drop{outline:2px dashed var(--accent);outline-offset:
   <button id="revert" title="Restore the most recent backup">Revert</button>
   <button id="rebuild">Rebuild</button>
   <button id="apply" class="primary" disabled>Apply &amp; rebuild</button>
+  <button id="exit" title="stop Slidewinder and release the terminal">Exit</button>
 </header>
 <div id="status"></div>
 <main><div id="grid"></div></main>
@@ -1614,11 +1615,13 @@ textarea.cell.drop,#edtext.drop{outline:2px dashed var(--accent);outline-offset:
 </div></div>
 <script>
 let S=null, order=[], hidden=new Set(), dirty=false, dragId=null, poll=null,
-    sel=null, showLog=false, flash='', pendingRefresh=null, clickTimer=null;
+    sel=null, showLog=false, flash='', pendingRefresh=null, clickTimer=null,
+    stopped=false;
 const $=s=>document.querySelector(s);
 const grid=$('#grid');
 
 async function load(keep){
+  if(stopped) return;
   const r=await fetch('api/state',{cache:'no-store'}); const st=await r.json();
   const rebuilt = !S || st.build!==S.build;
   S=st;
@@ -2338,6 +2341,24 @@ $('#reset').onclick=()=>{ order=S.order.slice();
   hidden=new Set(S.blocks.filter(b=>b.disabled).map(b=>b.id)); dirty=false; render(); };
 $('#revert').onclick=async ()=>{ if(await ask('Restore the most recent backup and rebuild?'))
   post('api/revert',{}); };
+
+/* Exit stops the server, so the terminal comes back and nothing is left
+   running in the background. */
+$('#exit').onclick=async ()=>{
+  const warn = dirty ? 'You have changes that have not been written. Stop anyway?'
+                     : 'Stop Slidewinder? The server shuts down and this page stops working.';
+  if(!(await ask(warn))) return;
+  stopped=true;
+  if(poll){ clearInterval(poll); poll=null; }
+  try{ await fetch('api/quit',{method:'POST',headers:{'Content-Type':'application/json'},
+                               body:'{}'}); }catch(err){}
+  document.body.innerHTML=
+    '<div style="display:flex;align-items:center;justify-content:center;'+
+    'height:100vh;flex-direction:column;gap:10px;text-align:center;padding:24px">'+
+    '<h1 style="margin:0;font-size:20px">Slidewinder has stopped</h1>'+
+    '<p class="hint" style="margin:0">Your deck is saved. Close this tab; '+
+    'run <code>python3 slidewinder.py '+esc(S.name)+'</code> to start again.</p></div>';
+};
 $('#newbtn').onclick=()=>insertAfter(sel===null?null:sel);
 $('#newsec').onclick=()=>insertAfter(sel===null?null:sel,'section');
 $('#newtoc').onclick=()=>insertAfter(sel===null?null:sel,'outline');
@@ -2579,6 +2600,15 @@ class Handler(BaseHTTPRequestHandler):
                 if len(raw) > 25 * 1024 * 1024:
                     return self._json({"error": "that file is over 25MB"})
                 return self._json({"path": pr.save_upload(body.get("name"), raw)})
+            if p == "/api/quit":
+                self._json({"ok": True})
+                # shutdown() blocks until serve_forever returns, so it cannot
+                # run on this handler's own thread
+                def stop():
+                    time.sleep(0.4)
+                    self.server.shutdown()
+                threading.Thread(target=stop, daemon=True).start()
+                return
             if p == "/api/revert":
                 if pr.building:
                     return self._json({"error": "a build is already running"})
@@ -2710,13 +2740,16 @@ def main(argv=None):
     # the query makes this a fresh URL every run, so a page cached by an earlier
     # run (or an older version of this app) can never be served instead
     url = "http://%s:%d/?r=%s" % (args.host, args.port, pr.run_id)
-    print("serving %s   (Ctrl-C to stop)" % url)
+    print("serving %s   (Ctrl-C here, or Exit in the page, to stop)" % url)
     if not args.no_open:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
     try:
         srv.serve_forever()
+        print("stopped from the browser")
     except KeyboardInterrupt:
         print("\nbye")
+    finally:
+        srv.server_close()
 
 
 if __name__ == "__main__":

@@ -217,6 +217,10 @@ slide template is
 Put your own in `.slidewinder/<name>/newslide.tex` to change it. **−** (or the
 Delete key) removes a slide after a confirm.
 
+**Exit** shuts the server down from the page, so you get your terminal back
+without switching to it and nothing is left running. It asks first, and warns
+if you have changes that were never written.
+
 ## Keyboard
 
 | key | action |

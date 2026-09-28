@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1 — 2026-09-28
+
+- **Exit** button: stops the server from the page and hands the terminal back.
+  It confirms first, warns about unwritten changes, and leaves a note with the
+  command to start again.
+
 ## 1.1.0 — 2026-09-28
 
 - **Edit file**: a view of the whole document where the preamble, the text
