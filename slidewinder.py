@@ -33,7 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 WORKDIR = ".slidewinder"          # previews, thumbnails, caches and backups
 OLD_WORKDIRS = (".beamer_sort",)  # earlier name; moved across on first run
 
@@ -217,6 +217,12 @@ def only_comments(s: str) -> bool:
 
 NEW_FRAME = """\\begin{frame}{New slide}
   % add content here
+\\end{frame}"""
+
+NEW_SECTION = """\\section{New section}"""
+
+NEW_OUTLINE = """\\begin{frame}{Outline}
+  \\tableofcontents
 \\end{frame}"""
 
 
@@ -509,9 +515,11 @@ def scan_blocks(src, mask, start, end, sections=True, subsections=False,
 class TexDoc:
     """The parsed presentation."""
 
-    def __init__(self, path: Path, want_sections=True, want_subsections=False):
+    def __init__(self, path: Path, want_sections=True, want_subsections=False,
+                 text=None):
         self.path = path
-        self.src = path.read_text(encoding="utf-8", errors="surrogateescape")
+        self.src = (text if text is not None
+                    else path.read_text(encoding="utf-8", errors="surrogateescape"))
         self.mask = code_mask(self.src)
         self.want_sections = want_sections
         self.want_subsections = want_subsections
@@ -631,7 +639,7 @@ class TexDoc:
         return "".join(pieces)
 
     def rewrite(self, order, disabled=(), edits=None, inserts=None,
-                deletes=()) -> str:
+                deletes=(), gaps=None) -> str:
         """Source with the blocks permuted, commented in or out, edited, and
         with new blocks inserted.  Everything between blocks stays anchored.
 
@@ -653,9 +661,10 @@ class TexDoc:
             text = edits[bid] if bid in edits else self.live_text(b)
             return comment_text(text) if bid in want_off else text
 
+        gaps = {int(k): v for k, v in (gaps or {}).items()}
         gone = set(deletes)
         kept = [bid for bid in order if bid not in gone]
-        out = [self.src[:blocks[0].start]]
+        out = [gaps.get(0, self.gap(0))]
         for text in after_map.get(None, []):
             out.append(text.rstrip("\n") + "\n\n")
         for slot, bid in enumerate(kept):
@@ -663,14 +672,29 @@ class TexDoc:
             for text in after_map.get(bid, []):
                 out.append("\n\n" + text.rstrip("\n"))
             if slot < len(kept) - 1:
-                out.append(self.src[blocks[slot].end:blocks[slot + 1].start])
+                out.append(gaps.get(slot + 1, self.gap(slot + 1)))
         # inserts hung off a deleted block still have to go somewhere
         for bid in order:
             if bid in gone:
                 for text in after_map.get(bid, []):
                     out.append("\n\n" + text.rstrip("\n"))
-        out.append(self.src[blocks[-1].end:])
+        out.append(gaps.get(len(blocks), self.gap(len(blocks))))
         return "".join(out)
+
+    def gap(self, i: int) -> str:
+        """Text before block 0 (i=0), between blocks i-1 and i, or after the
+        last block (i=len(blocks)).  Everything that is not a movable block."""
+        blocks = self.blocks
+        if not blocks:
+            return self.src
+        if i <= 0:
+            return self.src[:blocks[0].start]
+        if i >= len(blocks):
+            return self.src[blocks[-1].end:]
+        return self.src[blocks[i - 1].end:blocks[i].start]
+
+    def gaps(self):
+        return [self.gap(i) for i in range(len(self.blocks) + 1)]
 
     # kept for callers that only reorder
     def reordered(self, order, disabled=()) -> str:
@@ -1044,7 +1068,7 @@ class Project:
 
     # -- writing -----------------------------------------------------------
     def apply_order(self, order, disabled=(), edits=None, inserts=None,
-                    deletes=None):
+                    deletes=None, gaps=None):
         doc = self.doc
         if doc is None:
             raise BuildError("nothing parsed yet")
@@ -1077,10 +1101,19 @@ class Project:
         if any(b not in range(n) for b in gone):
             raise BuildError("unknown block id in the delete list")
 
+        clean_gaps = {}
+        for k, v in (gaps or {}).items():
+            i = int(k)
+            if not 0 <= i <= n:
+                raise BuildError("no such gap %d" % i)
+            v = v.replace("\r\n", "\n").replace("\r", "\n")
+            if v != doc.gap(i):
+                clean_gaps[i] = v
+
         same_order = order == list(range(n))
         same_state = want_off == {b.id for b in doc.blocks if b.disabled}
         if (same_order and same_state and not clean_edits and not clean_inserts
-                and not gone):
+                and not gone and not clean_gaps):
             return None, []
 
         # where the inserted blocks will land once the file is re-parsed:
@@ -1096,17 +1129,28 @@ class Project:
             seq += ["new"] * len(after_map.get(bid, []))
         new_ids = [i for i, kind in enumerate(seq) if kind == "new"]
 
+        new_src = doc.rewrite(order, want_off, clean_edits, clean_inserts, gone,
+                              clean_gaps)
+        if clean_gaps:            # a bad preamble edit must not reach the file
+            probe = TexDoc(self.tex, self.sections, self.subsections, text=new_src)
+            if not find_token(new_src, probe.mask, r"\\end\{document\}"):
+                raise BuildError("that edit loses \\end{document}")
+
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         backup = self.backups / ("%s.%s.bak" % (self.tex.name, stamp))
         shutil.copy2(self.tex, backup)
-        new_src = doc.rewrite(order, want_off, clean_edits, clean_inserts, gone)
         tmp = self.tex.with_suffix(self.tex.suffix + ".tmp")
         tmp.write_text(new_src, encoding="utf-8", errors="surrogateescape")
         tmp.replace(self.tex)
         return backup, new_ids
 
-    def new_frame(self):
-        """Template for an inserted slide: <work>/newslide.tex if you made one."""
+    def new_frame(self, kind="slide"):
+        """Template for an inserted block.  A slide can be overridden by
+        putting your own in <work>/newslide.tex."""
+        if kind == "section":
+            return NEW_SECTION
+        if kind == "outline":
+            return NEW_OUTLINE
         tpl = self.work / "newslide.tex"
         try:
             if tpl.exists():
@@ -1116,6 +1160,16 @@ class Project:
         except OSError:
             pass
         return NEW_FRAME
+
+    def document(self):
+        """The file as alternating gaps and blocks, for the whole-file editor."""
+        doc = self.doc
+        if doc is None:
+            raise BuildError("nothing parsed yet")
+        return {"gaps": doc.gaps(),
+                "blocks": [{"id": b.id, "kind": b.kind, "title": b.title,
+                            "disabled": b.disabled, "line": b.line}
+                           for b in doc.blocks]}
 
     def block_source(self, bid):
         doc = self.doc
@@ -1347,10 +1401,31 @@ pre#log{margin:8px 16px 24px;padding:10px 12px;background:var(--panel);border:1p
 #overlay .cap button{background:rgba(255,255,255,.14);border-color:transparent;color:#fff;
  padding:3px 10px}
 #overlay .cap button:hover{background:rgba(255,255,255,.3);border-color:transparent}
-#editor,#picker,#ask{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;
+#editor,#picker,#ask,#doc{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;
  z-index:60;align-items:center;justify-content:center;padding:20px}
-#picker{z-index:70} #ask{z-index:80}
-#editor .panel,#picker .panel,#ask .panel{background:var(--panel);
+#doc{z-index:58} #picker{z-index:70} #ask{z-index:80}
+#doc .panel{width:min(1100px,96vw);height:min(940px,94vh);resize:both;
+ min-width:520px;min-height:360px;max-width:98vw;max-height:96vh}
+#docbody{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:6px;
+ min-height:0;background:var(--bg)}
+/* flex:none matters - #docbody is a flex column and would otherwise squash
+   each box down to a line however tall we set it */
+textarea.gap{flex:none;border:1px solid transparent;border-radius:7px;outline:0;
+ resize:none;padding:8px 10px;width:100%;overflow:hidden;background:var(--panel);
+ color:var(--ink);font:12.5px/1.5 ui-monospace,Menlo,Consolas,monospace;tab-size:2}
+textarea.gap:focus{border-color:var(--accent);background:var(--panel)}
+textarea.gap.empty{opacity:.45;min-height:26px;padding:3px 10px}
+textarea.gap.empty:focus{opacity:1}
+.fbox{flex:none;display:flex;align-items:center;gap:9px;padding:9px 12px;cursor:pointer;
+ border:1px solid var(--line);border-radius:8px;background:var(--accent-soft)}
+.fbox:hover{border-color:var(--accent)}
+.fbox .ic{color:var(--accent);font-size:13px}
+.fbox .t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.fbox .k{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.fbox.off{background:transparent;border-style:dashed}
+.fbox.off .t{text-decoration:line-through;color:var(--muted);font-weight:400}
+.fbox.sect{background:transparent;border-left:3px solid var(--accent)}
+#editor .panel,#picker .panel,#ask .panel,#doc .panel{background:var(--panel);
  border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;
  box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden}
 /* the editor window itself: drag the bottom-right corner */
@@ -1359,10 +1434,10 @@ pre#log{margin:8px 16px 24px;padding:10px 12px;background:var(--panel);border:1p
 #picker .panel{width:min(900px,92vw);max-height:80vh}
 #ask .panel{width:min(420px,92vw)}
 .askmsg{padding:18px 18px 4px;line-height:1.5}
-#editor .bar,#picker .bar,#ask .bar{display:flex;align-items:center;gap:8px;
+#editor .bar,#picker .bar,#ask .bar,#doc .bar{display:flex;align-items:center;gap:8px;
  padding:8px 12px;border-bottom:1px solid var(--line);flex:none}
-#editor .bar:last-child,#picker .bar:last-child,#ask .bar{border-bottom:0;
- border-top:1px solid var(--line)}
+#editor .bar:last-child,#picker .bar:last-child,#ask .bar,#doc .bar:last-child{
+ border-bottom:0;border-top:1px solid var(--line)}
 .tabs{display:flex;margin-left:6px}
 .tab{border-radius:0;border:1px solid var(--line);margin:0 0 0 -1px;padding:4px 12px;
  color:var(--muted)}
@@ -1432,7 +1507,9 @@ textarea.cell.drop,#edtext.drop{outline:2px dashed var(--accent);outline-offset:
   <h1>Slidewinder</h1><span class="file" id="fname">__NAME__</span>
   <span class="grow"></span>
   <button id="newbtn" title="insert a new slide after the selected one (n)">+ Slide</button>
-  <span class="hint" title="click a slide to edit it. keys: v view &middot; x comment out &middot; n new slide &middot; del delete">click to edit &middot; v view &middot; x hide &middot; n new</span>
+  <button id="newsec" title="insert a \section after the selected one">+ Section</button>
+  <button id="newtoc" title="insert a \tableofcontents slide">+ TOC</button>
+  <button id="docbtn" title="edit the preamble and everything between the frames">Edit file</button>
   <span class="hint">size</span><input type="range" id="zoom" min="120" max="420" step="10" value="190">
   <a href="preview.pdf" id="pdflink" target="_blank" class="hint" style="text-decoration:none">pdf</a>
   <button id="logbtn">Log</button>
@@ -1465,6 +1542,7 @@ textarea.cell.drop,#edtext.drop{outline:2px dashed var(--accent);outline-offset:
       <button id="ednext" title="next slide">&#9654;</button>
       <button id="ednew" title="save this slide and add a new one after it (n)">+ New</button>
       <button id="edclose">Close</button>
+      <button id="edback" hidden title="back to the document">&#8592; Back</button>
       <button id="edsave" class="primary">Save &amp; rebuild</button>
     </div>
     <div class="edbody">
@@ -1503,6 +1581,20 @@ textarea.cell.drop,#edtext.drop{outline:2px dashed var(--accent);outline-offset:
       </div>
     </div>
     <div class="bar"><span id="ederr" class="err"></span><span class="grow"></span>
+      <span class="hint">&#8984;/ctrl + Enter saves &middot; Esc closes</span></div>
+  </div>
+</div>
+<div id="doc">
+  <div class="panel">
+    <div class="bar">
+      <b id="doctitle">document</b>
+      <span class="hint">frames are boxes &mdash; click one to edit that slide</span>
+      <span class="grow"></span>
+      <button id="docclose">Close</button>
+      <button id="docsave" class="primary">Save &amp; rebuild</button>
+    </div>
+    <div id="docbody"></div>
+    <div class="bar"><span id="docerr" class="err"></span><span class="grow"></span>
       <span class="hint">&#8984;/ctrl + Enter saves &middot; Esc closes</span></div>
   </div>
 </div>
@@ -1765,6 +1857,10 @@ function keys(e){
     if(e.key==='Escape'){ tryClose(); e.preventDefault(); }
     return;
   }
+  if($('#doc').style.display==='flex'){  // so does the document view
+    if(e.key==='Escape'){ closeDoc(); e.preventDefault(); }
+    return;
+  }
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
   if((e.key==='x'||e.key==='X')&&sel!==null){toggle(sel);e.preventDefault();}
   else if((e.key==='e'||e.key==='E'||e.key==='Enter')&&sel!==null){edit(sel);e.preventDefault();}
@@ -1792,6 +1888,99 @@ function ask(msg){
     $('#askmsg').textContent=msg; $('#ask').style.display='flex';
     const done=v=>{ $('#ask').style.display='none'; res(v); };
     $('#askyes').onclick=()=>done(true); $('#askno').onclick=()=>done(false);
+  });
+}
+
+/* ---- the whole-file editor --------------------------------------------
+   Everything that is not a movable block is an editable box; the blocks
+   themselves collapse to one clickable line, so the frames cannot be broken
+   by accident and the preamble is right there.                            */
+let docGaps=[], docBlocks=[], docDirty=false, fromDoc=false;
+
+async function openDoc(){
+  if(dirty){
+    if(!(await ask('You have unapplied changes in the sorter. Apply them first?'))) return;
+    await post('api/apply',{order:order, disabled:[...hidden]});
+    await waitBuild();
+  }
+  const j=await (await fetch('api/document',{cache:'no-store'})).json();
+  if(j.error){ flash=j.error; render(); return; }
+  docGaps=j.gaps.slice(); docBlocks=j.blocks; docDirty=false;
+  $('#doctitle').textContent=S.name+'  —  whole document';
+  $('#docerr').textContent='';
+  $('#doc').style.display='flex';   // must be laid out before the textareas
+  renderDoc();                      // are sized, or scrollHeight reads 0
+}
+
+function grow(ta){
+  if(!ta.value.trim()){ ta.style.height='26px'; return; }   // blank gaps stay thin
+  ta.style.height='auto';
+  ta.style.height=Math.max(ta.scrollHeight,40)+'px';
+}
+
+function renderDoc(){
+  const host=$('#docbody'); host.innerHTML='';
+  docGaps.forEach((g,i)=>{
+    const ta=document.createElement('textarea');
+    ta.className='gap'+(g.trim()?'':' empty');
+    ta.value=g; ta.spellcheck=false;
+    ta.placeholder=i===0? 'preamble' : 'between the frames';
+    ta.oninput=()=>{ docGaps[i]=ta.value; docDirty=true;
+                     ta.classList.toggle('empty',!ta.value.trim()); grow(ta); };
+    host.appendChild(ta); grow(ta);
+    const b=docBlocks[i];
+    if(!b) return;
+    const d=document.createElement('div');
+    d.className='fbox'+(b.disabled?' off':'')+(b.kind!=='frame'?' sect':'');
+    d.innerHTML='<span class="ic">'+(b.kind==='frame'?'▣':'§')+'</span>'+
+      '<span class="t">'+esc(b.title||'(untitled)')+'</span>'+
+      '<span class="k">'+esc(b.kind)+(b.disabled?' · commented out':'')+'</span>';
+    d.title='click to edit this '+b.kind;
+    d.onclick=()=>slideFromDoc(b.id);
+    host.appendChild(d);
+  });
+  // one more pass once fonts and layout have settled
+  requestAnimationFrame(()=>host.querySelectorAll('textarea.gap').forEach(grow));
+  setTimeout(()=>host.querySelectorAll('textarea.gap').forEach(grow),60);
+}
+
+function gapPayload(){
+  const out={}; docGaps.forEach((g,i)=>{ out[i]=g; }); return out;
+}
+
+async function saveDoc(close){
+  if(S.building){ $('#docerr').textContent='a build is running — one moment'; return false; }
+  const j=await send('api/apply',{order:order, disabled:[...hidden], gaps:gapPayload()});
+  if(j.error){ $('#docerr').textContent=j.error; flash=''; return false; }
+  $('#docerr').textContent=''; docDirty=false;
+  await load(true);
+  if(close) $('#doc').style.display='none';
+  return true;
+}
+
+async function slideFromDoc(id){
+  if(docDirty && !(await saveDoc(false))) return;
+  $('#doc').style.display='none';
+  fromDoc=true;
+  await edit(id);
+}
+
+async function backToDoc(){
+  fromDoc=false;
+  closeEditor();
+  await openDoc();
+}
+
+async function closeDoc(){
+  if(docDirty && !(await ask('Close without saving your changes?'))) return;
+  $('#doc').style.display='none'; docDirty=false;
+  await load(true);
+}
+
+function waitBuild(){
+  return new Promise(res=>{
+    const t=setInterval(async ()=>{ await load(true);
+      if(!S.building){ clearInterval(t); res(); } },600);
   });
 }
 
@@ -1880,6 +2069,8 @@ async function edit(id){
   $('#edtitle').textContent=(j.kind==='frame'?'Slide':j.kind)+' '+(n+1)+'/'+order.length+
     (j.disabled?'  \u2014 commented out':'');
   $('#ederr').textContent='';
+  $('#edback').hidden=!fromDoc;          // came in from the document view
+  $('#edclose').hidden=fromDoc;
   showPreview(j);
   $('#edtext').value=j.text;
   setTab(edModel? 'visual' : 'source');
@@ -2065,6 +2256,7 @@ function closeEditor(){ $('#editor').style.display='none'; edId=null; edModel=nu
 
 async function tryClose(){
   if(edDirty && !(await ask('Close without saving your changes?'))) return;
+  if(fromDoc){ await backToDoc(); return; }
   closeEditor(); await load(true);
 }
 
@@ -2115,9 +2307,9 @@ async function refreshPreview(id){
   else if(edTab==='source') $('#edtext').value=j.text;
 }
 
-async function insertAfter(id){
+async function insertAfter(id,kind){
   if(S.building) return;
-  const t=await fetch('api/template',{cache:'no-store'});
+  const t=await fetch('api/template'+(kind?'?kind='+kind:''),{cache:'no-store'});
   const tpl=(await t.json()).text;
   const j=await send('api/apply',{order:order, disabled:[...hidden],
                                   inserts:[{after:id, text:tpl}]});
@@ -2147,6 +2339,19 @@ $('#reset').onclick=()=>{ order=S.order.slice();
 $('#revert').onclick=async ()=>{ if(await ask('Restore the most recent backup and rebuild?'))
   post('api/revert',{}); };
 $('#newbtn').onclick=()=>insertAfter(sel===null?null:sel);
+$('#newsec').onclick=()=>insertAfter(sel===null?null:sel,'section');
+$('#newtoc').onclick=()=>insertAfter(sel===null?null:sel,'outline');
+$('#docbtn').onclick=openDoc;
+$('#docclose').onclick=closeDoc;
+$('#docsave').onclick=()=>saveDoc(false);
+$('#doc').addEventListener('keydown',e=>{
+  if(e.key==='Escape'){ closeDoc(); e.preventDefault(); }
+  else if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){ saveDoc(false); e.preventDefault(); }
+  else if(e.key==='Tab'&&e.target.tagName==='TEXTAREA'){ const t=e.target, s=t.selectionStart;
+    t.setRangeText('  ',s,t.selectionEnd,'end'); t.dispatchEvent(new Event('input'));
+    e.preventDefault(); }
+});
+$('#edback').onclick=()=>tryClose();
 $('#edclose').onclick=tryClose;
 $('#edsave').onclick=()=>saveEdit(true);
 $('#edprev').onclick=()=>edStep(-1);
@@ -2320,7 +2525,13 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:                        # noqa: BLE001
                 return self._json({"error": str(exc)})
         if p == "/api/template":
-            return self._json({"text": pr.new_frame()})
+            q = parse_qs(urlparse(self.path).query)
+            return self._json({"text": pr.new_frame(q.get("kind", ["slide"])[0])})
+        if p == "/api/document":
+            try:
+                return self._json(pr.document())
+            except Exception as exc:                        # noqa: BLE001
+                return self._json({"error": str(exc)})
         if p == "/api/images":
             try:
                 return self._json({"images": pr.images()})
@@ -2352,7 +2563,8 @@ class Handler(BaseHTTPRequestHandler):
                 backup, new_ids = pr.apply_order(order, disabled,
                                                  body.get("edits"),
                                                  body.get("inserts"),
-                                                 body.get("deletes"))
+                                                 body.get("deletes"),
+                                                 body.get("gaps"))
                 pr.rebuild_async("wrote %s" % (backup.name if backup else "no change"))
                 return self._json({"ok": True, "new": new_ids,
                                    "backup": backup.name if backup else None})

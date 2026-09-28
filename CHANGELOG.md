@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.0 — 2026-09-28
+
+- **Edit file**: a view of the whole document where the preamble, the text
+  between frames and the tail are editable, and every frame or section is a
+  box showing its title. Clicking a box opens that slide's editor, **← Back**
+  returns. Saving re-parses the result and refuses an edit that would lose
+  `\end{document}`.
+- **+ Section** and **+ TOC** buttons, next to + Slide: `\section{...}` and a
+  `\tableofcontents` frame, inserted after the selected card.
+- The rewriter can now replace the gaps between blocks, not just the blocks,
+  and an untouched document still round-trips byte for byte.
+
 ## 1.0.5 — 2026-09-27
 
 - **Fixed the LaTeX tab showing the visual editor as well.** `#vis` set

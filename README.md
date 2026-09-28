@@ -175,10 +175,38 @@ shares its lines — so `% \section{Intro} goes here` is left alone.
 A hidden frame is no longer in the PDF, so Slidewinder shows the thumbnail it
 had the last time it was compiled (cached by a hash of the block's text).
 
+## The whole file
+
+**Edit file** opens the document itself: the preamble, everything between the
+frames, and the tail are editable text, while each frame and section collapses
+to one box showing its title.
+
+![The document view](docs/document.png)
+
+So the parts you rarely touch but sometimes must — a `\usepackage` line, the
+title block, a stray `\note` between two frames — are right there, and the
+frames cannot be mangled by a careless paste, because here they are not text.
+Click a box and the slide editor opens on that frame; **← Back** returns you to
+the document. Blank gaps are thin strips: click one and type to put something
+between two slides.
+
+The file is re-parsed before anything is written and the save is refused if the
+edit would lose `\end{document}`, so a broken preamble never reaches your disk.
+
 ## Adding and deleting
 
 **+** on a card (or `n`) inserts a slide after it and opens the editor on it;
-**+ Slide** with nothing selected puts one at the front. The template is
+**+ Slide** with nothing selected puts one at the front. **+ Section** adds
+`\section{New section}` and **+ TOC** adds
+
+```latex
+\begin{frame}{Outline}
+  \tableofcontents
+\end{frame}
+```
+
+both after the selected card, opening the editor so you can name them. The
+slide template is
 
 ```latex
 \begin{frame}{New slide}
@@ -202,7 +230,7 @@ Delete key) removes a slide after a confirm.
 | x | comment it out, or back in |
 | n | insert a new slide after it |
 | Delete | delete it (asks first) |
-| ⌘/ctrl + Enter | save the editor; Esc closes it |
+| ⌘/ctrl + Enter | save the editor or the document view; Esc closes |
 | ← → / + − 0 / Esc in the viewer | page, zoom, fit, close |
 
 ## How it knows which page is which frame
